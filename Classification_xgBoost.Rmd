@@ -1,0 +1,229 @@
+---
+title: "Extreme Gradient Boosting"
+knit: (function(input_file, encoding) {
+  out_dir <- 'docs';
+  rmarkdown::render(input_file,
+ encoding=encoding,
+ output_file=file.path(dirname(input_file), out_dir, 'index.html'))})
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(data.table)
+library(dplyr)
+library(tidyr)
+library(caret)
+library(anytime)
+library(e1071)
+library(DMwR)
+library(glmnet)
+
+library(xgboost)
+library(DiagrammeR)
+library(ggplot2)
+library(hrbrthemes)
+library(viridis)
+library(ggrepel)
+
+setwd("//AHMCT-065/teams/PMRF/Amir/")
+load("./bin/xgBoost_by.roadCondition.RData")
+load("./bin/xgboost_by.roadCondition.train.RData")
+xgb.mod=xgb.load("./bin/xgb.mod")
+```
+
+This is an R Markdown for implementation of an extreme gradient boosting technique to a big data set for classifying roadside work zones based on their collision risk. The data set is already prepared and cleaned up. After partitioning the data into training and testing sets, the class imbalance is investigated.
+
+```{r training_split, eval=FALSE}
+train.ind=createDataPartition(df$collision_id, times = 1, p=0.7, list = FALSE)
+training.df=df[train.ind, ]
+testing.df=df[-train.ind, ]
+```
+
+```{r imbalance_plot, echo=FALSE, fig.align="center"}
+ggplot(data=training.df, aes(x=collision_id, fill=collision_id))+
+geom_bar()+
+theme_ipsum(axis_title_just = 'center')+
+scale_x_discrete(breaks=c(0, 1), labels=c("No collision", "collision"))+
+theme(
+  axis.line.x = element_line(size=1.5),
+  axis.text.x = element_text(size = 18, family = "Century Gothic", vjust = 0, hjust = 0.5),
+  axis.title.x = element_blank(),
+  axis.line = element_line(size=1.5),
+  axis.text.y = element_text(size = 18, family = "Century Gothic"),
+  axis.title.y = element_text(margin=margin(0, 15, 0, 0), size = 18, family = "Century Gothic"),
+  panel.grid.major = element_blank(),
+  panel.grid.minor = element_blank(),
+  legend.position = "none"
+)+
+ylab("Count")
+```
+
+This figure shows that class distribution is highly imbalanced. However, the xgBoost algorithm can handle data imbalance with class weights. In general binary classification, the weight of positive class in xgBoost parametrization, in this case ''Collision'', is given as the ratio of number of negative class to the positive class.
+
+```{r imbalance_summary}
+label=as.numeric(as.character(training.df$collision_id))
+sumwpos=sum(label==1)
+sumwneg=sum(label==0)
+print(sumwneg/sumwpos)
+```
+
+Since the training set is big enough to cause memory issues. Both training and testing sets are converted to sparse matrices.
+
+```{r sparse_matrix, eval=FALSE}
+dtest=sparse.model.matrix(collision_id~.-1, data = data.frame(testing.df))
+dtrain=sparse.model.matrix(collision_id~.-1, training.df)
+```
+
+For tunning the xgboost hyperparameters, the caret grid search method is used. Learning rate or <code>eta</code>, maximum depth of trees, and minimum child weight which measures the number of instances in a node before the algorithm decides to partition before. <code>gamma</code> denotes the minimum loss reduction required to make a further partition. <code>subsample</code> and <code>colsample_bytree</code> indicate the proportion of the training data set and features, respectively, used in training the algorithm. Before training the xgboost model, a parallel backend must be registered.
+
+```{r grid_search, eval=FALSE}
+xgb.grid=expand.grid(nrounds=100, 
+                     eta=seq(0.1, 1, 0.2),
+                     max_depth=c(3, 5, 10),
+                     gamma = 0, 
+                     subsample = 0.7,
+                     min_child_weight = c(1, 3, 5), 
+                     colsample_bytree = 1)
+
+myCl=makeCluster(detectCores()-1)
+registerDoParallel(myCl)
+
+xgb.control=trainControl(method = "cv",
+                         number = 5,
+                         verboseIter = TRUE,
+                         returnData = FALSE,
+                         returnResamp = "none",
+                         classProbs = TRUE,
+                         allowParallel = TRUE)
+
+xgb.train = train(x = dtrain,
+                  y = factor(label, labels = c("No.Collision", "Collision")),
+                  trControl = xgb.control,
+                  tuneGrid = xgb.grid,
+                  method = "xgbTree",
+                  scale_pos_weight=sumwneg/sumwpos)
+
+stopCluster(myCl)
+```
+
+The result of the grid search for tunning the xgBoost hyperparamaters are given below. This is the best configuration of The best configuration of <code>eta</code>, <code>max_depth</code>, and <code>min_child_weight</code> is given by:
+
+```{r optimization_result}
+xgb.train$bestTune
+```
+
+Using these parameters, a corss-validated training is done with <code>nrounds=500</code> to identify the best iteration, i.e., <code>nrounds</code>. The algorithm can stop early if the test accuracy is not improved for <code>early_stopping_rounds</code> number of iterations.☻
+
+```{r xgb_cv, eval=FALSE}
+params=list("eta"=xgb.train$bestTune$eta,
+            "max_depth"=xgb.train$bestTune$max_depth,
+            "gamma"=xgb.train$bestTune$gamma,
+            "min_child_weight"=xgb.train$bestTune$min_child_weight,
+            "nthread"=4,
+            "objective"="binary:logistic")
+
+xgb.crv=xgb.cv(params = params,
+               data = dtrain,
+               nrounds = 500,
+               nfold = 10,
+               label = label,
+               showsd = TRUE,
+               metrics = "auc",
+               stratified = TRUE,
+               verbose = TRUE,
+               print_every_n = 1L,
+               early_stopping_rounds = 50,
+               scale_pos_weight=sumwneg/sumwpos)
+```
+
+```{r cv_results}
+xgb.crv$best_iteration
+```
+
+The model has the highest accuracy in the 103rd interation. The testing and training accuracies of the cross-validated xgBoost fitting follow each other closely, and thus there is no need to consider a <code>gamma > 0</code>. 
+
+```{r test_train_plot, echo=FALSE, fig.align="center", fig.height=7, fig.width=10}
+ggplot(xgb.crv$evaluation_log, aes(x=iter))+
+  geom_line(aes(y=train_auc_mean, color="Training accuracy"), size=1.2)+
+  geom_ribbon(aes(y=train_auc_mean, 
+                  ymax=train_auc_mean+train_auc_std,
+                  ymin=train_auc_mean-train_auc_std,
+                  alpha=0.3))+
+  geom_line(aes(y=test_auc_mean, color="Testing accuracy"), size=1.2)+
+  geom_ribbon(aes(y=train_auc_mean, 
+                  ymax=test_auc_mean+test_auc_std,
+                  ymin=test_auc_mean-test_auc_std,
+                  alpha=0.3))+
+  theme_ipsum(axis_title_just = "center")+
+  theme(plot.title = element_blank(),
+        legend.text = element_text(size = 18, family = "Century Gothic", 
+                                   color = "black"),
+        axis.text.x = element_text(angle = 0, hjust = 0.5, size=18, 
+                                   family = "Century Gothic", color = "black"),
+        axis.title.x = element_text(size = 18, family = "Century Gothic", 
+                                    color = "black", margin = margin(15, 0, 0, 0)),
+        axis.text.y = element_text(size=18, family = "Century Gothic", color = "black"),
+        axis.title.y = element_text(size=18, family = "Century Gothic", color = "black",
+                                    margin = margin(0, 15, 0, 0)),
+        axis.line.x = element_line(size=1.2),
+        axis.line = element_line(size=1.2))+
+  xlab("Iteration")+ylab("Avg. accuracy")+
+  scale_alpha(guide="none")+
+  labs(color="")
+```
+
+To produce feature importances, an instance of the xgBoost learner is run with the optimized parameters of the grid search <code>xgb.train</code> and the cross-validated training <code>xgb.crv</code>.
+
+```{r xgBoost_model, eval=FALSE}
+xgb.mod=xgboost(data = dtrain, 
+                label = label, 
+                max.depth=xgb.train$bestTune$max_depth, 
+                eta=xgb.train$bestTune$eta, 
+                nthread=4, 
+                min_child_weight=xgb.train$bestTune$min_child_weight,
+                scale_pos_weight=sumwneg/sumwpos, 
+                eval_metric="auc", 
+                nrounds=xgb.crv$best_iteration, 
+                objective="binary:logistic")
+```
+
+The top 20 features with the highest importance are selected here.
+
+```{r importance_result}
+importance=xgb.importance(feature_names = colnames(dtrain), model = xgb.mod)
+importance$Feature[1:20]
+```
+
+xgBoost internally implements a dummy variable generation to transform categorical variables with $k$ levels to $k-1$ binary variables. The newly generated dummy variables are names by combining the feature names and its levles. The below code properly renames the top 20 features with the highest importance.
+
+```{r importance_name}
+feature.label=importance$Feature[1:20]
+feature.label=c("Closure = 1", "Work length", "Collision density", "Truck AADT",
+             "ADT", "Closure coverage", "Peak AADT", "Work duration", "Closure length",
+             "AADT", "Design speed", "Route ID = 10", "County = San Jose", "Activity code = M90000",
+             "Road width", "Surface type = Concrete", "Work month = Sep.", "Work month = Jul.", 
+             "Work day = Wed.", "Route ID = 210")
+```
+
+The top 20 feautre importances are plotted here. xgBoost records three measures of importance for trees; <code> Gain </code> which measure the contribution of each feature to optimization of the objective function, <code> Cover </code> counts the number of observations assigned to the feature, and <code> Weight </code> which denotes the number of times the feature was selected for a tree. The following plot shows the importances with respect to <code> Gain </code> and has undergon a little ggplot treatment.
+
+```{r importance_plot, eval=FALSE}
+(gg=xgb.ggplot.importance(importance_matrix = importance[1:20,]))
+```
+
+```{r importance_ggplot, echo=FALSE, fig.align="center", fig.height=7, fig.width=10}
+gg+theme_ipsum(axis_title_just = "center")+
+  theme(plot.title = element_blank(),
+        axis.text.x = element_text(hjust = 0.5, size=18, family = "Century Gothic", color = "black"),
+        axis.title.x = element_text(hjust = 1, size = 18, family = "Century Gothic", color = "black", margin = margin(15, 0, 0, 0)),
+        axis.text.y = element_text(size=18, family = "Century Gothic", color = "black"),
+        axis.title.y = element_blank(),
+        axis.line.x = element_line(size=1.2),
+        legend.position = "none")+
+  scale_x_discrete(labels=rev(feature.label))+
+  #xlab("Features")+
+  ylab("Average relative contribution to minimization of the objective function")
+```
+
