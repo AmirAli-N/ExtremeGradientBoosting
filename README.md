@@ -1,4 +1,4 @@
-###Extreme Gradient Boosting
+Extreme Gradient Boosting
 ================
 
 This is an R Markdown for implementation of an extreme gradient boosting
