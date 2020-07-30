@@ -366,7 +366,12 @@ summary {
 </div>
 
 
-<p>This is an R Markdown for implementation of an extreme gradient boosting technique to a big data set for classifying roadside work zones based on their collision risk. The data set is already prepared and cleaned up. After partitioning the data into training and testing sets, the class imbalance is investigated.</p>
+<p>This is an R Markdown for implementation of an extreme gradient boosting
+technique to a big data set for classifying roadside work zones based on
+their collision risk. The data set is already prepared and cleaned up.
+The full code implementatio can be found in <strong>Classification_xgboost.R</strong> file. 
+After partitioning the data into training and testing sets, the class
+imbalance is investigated.</p>
 <pre class="r"><code>train.ind=createDataPartition(df$collision_id, times = 1, p=0.7, list = FALSE)
 training.df=df[train.ind, ]
 testing.df=df[-train.ind, ]</code></pre>
