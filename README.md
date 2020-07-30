@@ -4,6 +4,7 @@ Extreme Gradient Boosting
 This is an R Markdown for implementation of an extreme gradient boosting
 technique to a big data set for classifying roadside work zones based on
 their collision risk. The data set is already prepared and cleaned up.
+The full code implementatio can be found in **Classification_xgboost.R** file. 
 After partitioning the data into training and testing sets, the class
 imbalance is investigated.
 
