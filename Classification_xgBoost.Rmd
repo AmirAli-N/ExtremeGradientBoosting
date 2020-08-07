@@ -5,7 +5,7 @@ knit: (function(input_file, encoding) {
   rmarkdown::render(input_file,
  encoding=encoding,
  output_file=file.path(dirname(input_file), out_dir, 'index.html'))})
-output: github_document
+output: html_document
 ---
 
 ```{r setup, include=FALSE}
@@ -17,8 +17,6 @@ library(tidyr)
 library(caret)
 library(anytime)
 library(e1071)
-library(DMwR)
-library(glmnet)
 
 library(xgboost)
 library(DiagrammeR)
@@ -27,10 +25,11 @@ library(hrbrthemes)
 library(viridis)
 library(ggrepel)
 
-setwd("//AHMCT-065/teams/PMRF/Amir/")
-load("./bin/xgBoost_by.roadCondition.RData")
-load("./bin/xgboost_by.roadCondition.train.RData")
-xgb.mod=xgb.load("./bin/xgb.mod")
+setwd("G:/My Drive/WorkingDesk/GitHub page/ExtremeGradientBoosting(xgBoost)")
+
+load("xgBoost_by.roadCondition.RData")
+load("xgboost_by.roadCondition.train.RData")
+xgb.mod=readRDS("xgb_scaled.mod")
 ```
 
 This is an R Markdown for implementation of an extreme gradient boosting
@@ -232,3 +231,4 @@ gg+theme_ipsum(axis_title_just = "center")+
   ylab("Average relative contribution to minimization of the objective function")
 ```
 
+It has been shown that these importances are not consistent between different data sets; see [Scott Lundberg et. al. (2019)](https://arxiv.org/abs/1905.04610) or [Scott's repository](https://github.com/slundberg/shap). Although, xgBoost is very powerfull in reaching high accuracies in training, it achieves that by using a large number of features. This is particularly problematic if the data set has a lot of features or is comprised of categorical variables with numerous levels. In this example, with 700 features, using prunning parameters such as <code>gamma</code>, <code>lambda</code>, <code>alpha</code>, <code>min_child_weight</code>, or <code>max_delta_step</code> does not significantly reduces the number of features used in fitting the model. At the end of training, more than 400 features still remian in the model. Therefore, selecting a small subset of features for interpretation requires arbitrary importance thresholds which as we discussed before are not consistent. This is why some feature selection wrappers such as Boruta or global importance analysis like SHAP values have been proposed; [see my own implementation](https://amirali-n.github.io/BorutaFeatureSelectionWithShapAnalysis/). 

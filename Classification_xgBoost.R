@@ -6,8 +6,6 @@ library(tidyr)
 library(caret)
 library(anytime)
 library(e1071)
-library(DMwR)
-library(glmnet)
 library(doParallel)
 
 library(xgboost)
